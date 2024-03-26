@@ -1,0 +1,28 @@
+---
+- name: "ensure openssl is installed (Debian)"
+  apt: name=openssl state=latest
+  when: ansible_os_family == "Debian"
+  
+- name: "ensure openssl is installed (RedHat)"
+  yum: name=openssl state=latest
+  when: ansible_os_family == "RedHat"
+
+- name: "create configuration directory"
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+  with_items:
+  - "{{ ca_certs_dir }}"
+
+- name: "Deploy configuration items"
+  template:
+    src: "{{ item }}.j2"
+    dest: "{{ ca_certs_dir }}/{{ item }}"
+    owner: root
+    group: root
+  with_items:
+    - serial
+    - ca.conf
+
