@@ -1,0 +1,83 @@
+---
+- name: Setup Certificate Authority with SSL
+  hosts: control_node
+  become: yes
+  vars:
+    ca_dir: "/etc/ssl/CA"
+    ca_name: "my_ca"
+    cert_days: 3650  # Validity of the CA certificate in days
+  tasks:
+    - name: Create CA directory
+      file:
+        path: "{{ ca_dir }}"
+        state: directory
+        mode: 0700
+
+    - name: Generate private key for CA
+      openssl_privatekey:
+        path: "{{ ca_dir }}/{{ ca_name }}.key"
+        size: 4096
+        mode: 0600
+
+    - name: Generate CA certificate
+      openssl_certificate:
+        path: "{{ ca_dir }}/{{ ca_name }}.crt"
+        privatekey_path: "{{ ca_dir }}/{{ ca_name }}.key"
+        csr_path: "{{ ca_dir }}/{{ ca_name }}.csr"
+        provider: selfsigned
+        common_name: "{{ ca_name }}"
+        days: "{{ cert_days }}"
+
+    - name: Copy CA certificate to Manage node
+      copy:
+        src: "{{ ca_dir }}/{{ ca_name }}.crt"
+        dest: "/tmp/{{ ca_name }}.crt"
+
+- name: Manage Node Configuration
+  hosts: manage_node
+  become: yes
+  vars:
+    ca_name: "my_ca"
+  tasks:
+    - name: Ensure CA certificate directory exists
+      file:
+        path: "/etc/ssl/certs/{{ ca_name }}"
+        state: directory
+        mode: 0755
+
+    - name: Copy CA certificate from Control Node
+      copy:
+        src: "/tmp/{{ ca_name }}.crt"
+        dest: "/etc/ssl/certs/{{ ca_name }}/{{ ca_name }}.crt"
+        mode: 0644
+
+    - name: Update CA certificate bundle
+      command: update-ca-certificates
+
+    - name: Configure Nginx to use CA certificate
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        line: "ssl_client_certificate /etc/ssl/certs/{{ ca_name }}/{{ ca_name }}.crt;"
+      notify: restart nginx
+
+    - name: Configure OpenSSL to use CA certificate
+      blockinfile:
+        path: /etc/ssl/openssl.cnf
+        block: |
+          [CA_default]
+          ...
+          ...
+          # Add the following line
+          ssl_client_certificate = /etc/ssl/certs/{{ ca_name }}/{{ ca_name }}.crt
+      notify: restart openssl
+
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: restart openssl
+      service:
+        name: openssl
+        state: restarted
